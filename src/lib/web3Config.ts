@@ -26,32 +26,38 @@ export const web3modal = createWeb3Modal({
   projectId,
   enableAnalytics: false,
   allWallets: 'SHOW',
-  customWallets: [
+  mobileWallets: [
     {
       id: 'metamask',
       name: 'MetaMask',
-      homepage: 'https://metamask.io',
-      image_url: 'https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg',
-      mobile_link: 'metamask://',
-      desktop_link: 'metamask://',
+      links: {
+        native: 'metamask://',
+        universal: 'https://metamask.app.link'
+      }
     },
     {
       id: 'trust',
       name: 'Trust Wallet',
-      homepage: 'https://trustwallet.com',
-      image_url: 'https://trustwallet.com/assets/images/media/assets/TWT.png',
-      mobile_link: 'trust://',
-      desktop_link: 'trust://',
-    },
-    {
-      id: 'safepal',
-      name: 'SafePal',
-      homepage: 'https://safepal.com',
-      image_url: 'https://safepal.com/assets/img/safepal-logo.png',
-      mobile_link: 'safepal://',
-      desktop_link: 'safepal://',
+      links: {
+        native: 'trust://',
+        universal: 'https://link.trustwallet.com'
+      }
     }
-  ]
+  ],
+  desktopWallets: [
+    {
+      id: 'metamask',
+      name: 'MetaMask',
+      links: {
+        native: 'metamask://',
+        universal: 'https://metamask.io'
+      }
+    }
+  ],
+  walletImages: {
+    metamask: 'https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg',
+    trust: 'https://trustwallet.com/assets/images/media/assets/TWT.png'
+  }
 });
 
 export const SUPPORTED_CHAINS = {

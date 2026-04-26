@@ -10,7 +10,7 @@ const ethersConfig = defaultConfig({
     name: 'PoolTradePlug',
     description: 'Decentralized Trading Pool Platform with Web3 Integration',
     url: typeof window !== 'undefined' ? window.location.origin : '',
-    icons: [typeof window !== 'undefined' ? `${window.location.origin}/icons/icon-192x192.png` : ''],
+    icons: [typeof window !== 'undefined' ? `${window.location.origin}/icons/icon-192.png` : ''],
   },
   enableEIP6963: true,
   enableInjected: true,
@@ -24,7 +24,7 @@ export const web3modal = createWeb3Modal({
   ethersConfig,
   chains: [mainnet, bsc, polygon, arbitrum, optimism, base],
   projectId,
-  enableAnalytics: false, // Disabled to prevent 403 errors from pulse.walletconnect.org
+  enableAnalytics: false,
   allWallets: 'SHOW',
   customWallets: [
     {

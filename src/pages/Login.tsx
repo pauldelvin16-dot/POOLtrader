@@ -67,8 +67,10 @@ const Login = () => {
 
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
-    if (error) toast.error(error.message);
-    else { toast.success("Welcome back!"); navigate("/dashboard"); }
+    if (error) {
+      console.error("Login error:", error);
+      toast.error(error.message || "Failed to sign in. Check your connection.");
+    } else { toast.success("Welcome back!"); navigate("/dashboard"); }
   };
 
   const submitForgot = async () => {

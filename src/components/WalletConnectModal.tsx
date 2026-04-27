@@ -83,7 +83,20 @@ export function WalletConnectModal({ isOpen, onClose }: WalletConnectModalProps)
     const mobile = isMobile();
     const hasMobileSupport = WALLET_CONFIGS.find(w => w.id === walletId)?.hasMobile;
     
+    console.log(`Checking wallet ${walletId}:`, { isInstalled, mobile, hasMobileSupport, result: isInstalled || (mobile && hasMobileSupport) });
+    
     return isInstalled || (mobile && hasMobileSupport);
+  };
+
+  const handleWalletClick = (walletId: string) => {
+    console.log('Wallet clicked:', walletId);
+    setSelectedWallet(walletId);
+    
+    // If wallet is installed but not connected via Web3Modal, try to trigger it
+    if (installedWallets.includes(walletId) && !isConnected) {
+      console.log('Installed wallet clicked, opening Web3Modal...');
+      open();
+    }
   };
 
   return (
@@ -189,20 +202,21 @@ export function WalletConnectModal({ isOpen, onClose }: WalletConnectModalProps)
                 {WALLET_CONFIGS.map((wallet) => {
                   const isAvailable = isWalletAvailable(wallet.id);
                   const isDetected = detectedWallet === wallet.id;
+                  const isInstalled = installedWallets.includes(wallet.id);
                   
                   return (
                     <Button
                       key={wallet.id}
-                      onClick={() => setSelectedWallet(wallet.id)}
+                      onClick={() => handleWalletClick(wallet.id)}
                       variant={selectedWallet === wallet.id ? 'default' : isDetected ? 'secondary' : 'outline'}
-                      className={`text-xs justify-start ${!isAvailable ? 'opacity-50' : ''} ${isDetected ? 'ring-2 ring-green-500' : ''}`}
-                      disabled={isConnecting || !isAvailable}
-                      title={!isAvailable ? 'Wallet not detected' : isDetected ? 'Auto-detected' : ''}
+                      className={`text-xs justify-start ${!isAvailable ? 'opacity-50' : ''} ${isDetected ? 'ring-2 ring-green-500' : ''} ${isInstalled ? 'border-blue-500 border-2' : ''}`}
+                      disabled={isConnecting}
+                      title={!isAvailable ? 'Wallet not detected - use WalletConnect' : isDetected ? 'Auto-detected' : isInstalled ? 'Click to select' : 'WalletConnect compatible'}
                     >
                       <span className="mr-2">{wallet.icon}</span>
                       <span className="truncate">{wallet.name}</span>
                       {isDetected && <Badge className="ml-auto bg-green-500 text-white text-[10px] px-1">Auto</Badge>}
-                      {installedWallets.includes(wallet.id) && !isDetected && <Badge className="ml-auto bg-blue-500 text-white text-[10px] px-1">Installed</Badge>}
+                      {isInstalled && !isDetected && <Badge className="ml-auto bg-blue-500 text-white text-[10px] px-1">Installed</Badge>}
                     </Button>
                   );
                 })}

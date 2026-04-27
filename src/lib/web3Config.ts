@@ -1,7 +1,18 @@
 import { defaultConfig, createWeb3Modal } from '@web3modal/ethers/react';
 import { mainnet, bsc, polygon, arbitrum, optimism, base } from 'viem/chains';
 
-const projectId = import.meta.env.VITE_WEB3_PROJECT_ID || 'c08ccaaa8e56c1256d0bb152862a93eb';
+const projectId = import.meta.env.VITE_WEB3_PROJECT_ID;
+
+const isValidWalletConnectProjectId = (value: string | undefined) => {
+  // WalletConnect Cloud projectId is a 32-char hex string
+  return !!value && /^[a-f0-9]{32}$/i.test(value);
+};
+
+if (!isValidWalletConnectProjectId(projectId)) {
+  console.error(
+    'Invalid or missing VITE_WEB3_PROJECT_ID. Set it to your WalletConnect Cloud projectId (32-char hex) from https://cloud.walletconnect.com'
+  );
+}
 
 const chains = [mainnet, bsc, polygon, arbitrum, optimism, base] as const;
 
@@ -23,68 +34,11 @@ const ethersConfig = defaultConfig({
 export const web3modal = createWeb3Modal({
   ethersConfig,
   chains: [mainnet, bsc, polygon, arbitrum, optimism, base],
-  projectId,
+  // If projectId is invalid, Web3Modal will not be able to establish WalletConnect sessions on mobile.
+  // We still pass through the raw env value so it's obvious in runtime logs what was configured.
+  projectId: projectId || '',
   enableAnalytics: false,
   allWallets: 'SHOW',
-  mobileWallets: [
-    {
-      id: 'metamask',
-      name: 'MetaMask',
-      links: {
-        native: 'metamask://',
-        universal: 'https://metamask.app.link'
-      }
-    },
-    {
-      id: 'trust',
-      name: 'Trust Wallet',
-      links: {
-        native: 'trust://',
-        universal: 'https://link.trustwallet.com'
-      }
-    },
-    {
-      id: 'rainbow',
-      name: 'Rainbow',
-      links: {
-        native: 'rainbow://',
-        universal: 'https://rnbwapp.com'
-      }
-    },
-    {
-      id: 'coinbase',
-      name: 'Coinbase Wallet',
-      links: {
-        native: 'coinbasewallet://',
-        universal: 'https://go.cb-w.com'
-      }
-    },
-    {
-      id: 'phantom',
-      name: 'Phantom',
-      links: {
-        native: 'phantom://',
-        universal: 'https://phantom.app'
-      }
-    }
-  ],
-  desktopWallets: [
-    {
-      id: 'metamask',
-      name: 'MetaMask',
-      links: {
-        native: 'metamask://',
-        universal: 'https://metamask.io'
-      }
-    }
-  ],
-  walletImages: {
-    metamask: 'https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg',
-    trust: 'https://trustwallet.com/assets/images/media/assets/TWT.png',
-    rainbow: 'https://rainbow.me/static/og-image.png',
-    coinbase: 'https://www.coinbase.com/assets/icons/coinbase-icon-512.png',
-    phantom: 'https://phantom.app/img/phantom-logo.svg'
-  }
 });
 
 export const SUPPORTED_CHAINS = {

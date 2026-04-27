@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, Wallet, AlertCircle, Smartphone, ExternalLink } from 'lucide-react';
 import { useWallet } from '@/hooks/useWeb3Wallet';
 import { CHAIN_NAMES } from '@/lib/web3Config';
+import { toast } from 'sonner';
 
 interface WalletConnectModalProps {
   isOpen: boolean;
@@ -62,11 +63,16 @@ export function WalletConnectModal({ isOpen, onClose }: WalletConnectModalProps)
     }
   }, [isConnected, address, detectWalletType]);
 
-  const handleConnectWallet = async () => {
-    if (!address || !selectedWallet) return;
+  const handleConnectWallet = async (walletType?: string) => {
+    const walletToConnect = walletType || selectedWallet;
+    if (!address || !walletToConnect) {
+      toast.error('Please select a wallet and connect first');
+      return;
+    }
 
-    await connectWallet(selectedWallet);
-    if (!error) {
+    const success = await connectWallet(walletToConnect);
+    if (success) {
+      toast.success('Wallet connected successfully!');
       onClose();
     }
   };
@@ -88,15 +94,20 @@ export function WalletConnectModal({ isOpen, onClose }: WalletConnectModalProps)
     return isInstalled || (mobile && hasMobileSupport);
   };
 
-  const handleWalletClick = (walletId: string) => {
+  const handleWalletClick = async (walletId: string) => {
     console.log('Wallet clicked:', walletId);
     setSelectedWallet(walletId);
     
-    // If wallet is installed but not connected via Web3Modal, try to trigger it
-    if (installedWallets.includes(walletId) && !isConnected) {
-      console.log('Installed wallet clicked, opening Web3Modal...');
-      open();
+    // If not connected via Web3Modal, open it first
+    if (!isConnected || !address) {
+      console.log('Not connected, opening Web3Modal...');
+      await open();
+      return;
     }
+    
+    // If already connected, proceed with wallet connection
+    console.log('Already connected, proceeding with wallet connection...');
+    await handleConnectWallet(walletId);
   };
 
   return (
@@ -243,7 +254,7 @@ export function WalletConnectModal({ isOpen, onClose }: WalletConnectModalProps)
               Cancel
             </Button>
             <Button
-              onClick={handleConnectWallet}
+              onClick={() => handleConnectWallet()}
               className="flex-1"
               disabled={!isConnected || !selectedWallet || isConnecting}
             >

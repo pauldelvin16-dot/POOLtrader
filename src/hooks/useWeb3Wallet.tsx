@@ -85,11 +85,30 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const ensureSigner = useCallback(async () => {
     if (!walletProvider || !isConnected || !address) return null;
 
-    const ethersProvider = new BrowserProvider(walletProvider);
-    const ethersSigner = await ethersProvider.getSigner();
-    setProvider(ethersProvider);
-    setSigner(ethersSigner);
-    return { ethersProvider, ethersSigner };
+    try {
+      const ethersProvider = new BrowserProvider(walletProvider);
+      
+      // Check if we can get accounts without throwing
+      const accounts = await ethersProvider.send('eth_accounts', []).catch(() => []);
+      if (!accounts || accounts.length === 0) {
+        console.log('No accounts available yet, waiting for wallet connection...');
+        return null;
+      }
+      
+      const ethersSigner = await ethersProvider.getSigner();
+      setProvider(ethersProvider);
+      setSigner(ethersSigner);
+      return { ethersProvider, ethersSigner };
+    } catch (err: any) {
+      // Silently handle eth_requestAccounts errors - wallet not ready yet
+      if (err.message?.includes('eth_requestAccounts') || 
+          err.message?.includes('could not coalesce') ||
+          err.message?.includes('not allowed')) {
+        console.log('Wallet not ready for signer, will retry...');
+        return null;
+      }
+      throw err;
+    }
   }, [walletProvider, isConnected, address]);
 
   // Initialize provider and signer reactively

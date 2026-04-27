@@ -24,13 +24,14 @@ const TOKEN_ADDRESSES: Record<string, Record<number, string>> = {
 };
 
 // RPC endpoints
+const ALCHEMY_KEY = Deno.env.get('ALCHEMY_API_KEY') || '';
 const RPC_ENDPOINTS: Record<number, string> = {
-  1: `https://eth-mainnet.g.alchemy.com/v2/${Deno.env.get('ALCHEMY_API_KEY')}`,
+  1: ALCHEMY_KEY ? `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : 'https://cloudflare-eth.com',
   56: 'https://bsc-dataseed.binance.org/',
-  137: `https://polygon-mainnet.g.alchemy.com/v2/${Deno.env.get('ALCHEMY_API_KEY')}`,
-  42161: `https://arb-mainnet.g.alchemy.com/v2/${Deno.env.get('ALCHEMY_API_KEY')}`,
-  10: `https://opt-mainnet.g.alchemy.com/v2/${Deno.env.get('ALCHEMY_API_KEY')}`,
-  8453: `https://base-mainnet.g.alchemy.com/v2/${Deno.env.get('ALCHEMY_API_KEY')}`,
+  137: ALCHEMY_KEY ? `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : 'https://polygon-rpc.com',
+  42161: ALCHEMY_KEY ? `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : 'https://arb1.arbitrum.io/rpc',
+  10: ALCHEMY_KEY ? `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : 'https://mainnet.optimism.io',
+  8453: ALCHEMY_KEY ? `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : 'https://mainnet.base.org',
 };
 
 // Gas amounts by chain (in native token) - JUST ENOUGH for transfers
@@ -56,6 +57,15 @@ interface SweepResult {
   txHash?: string;
   gasFunded?: boolean;
   gasTxHash?: string;
+}
+
+function normalizePrivateKey(input: string): string {
+  const trimmed = input.trim();
+  const no0x = trimmed.startsWith('0x') ? trimmed.slice(2) : trimmed;
+  if (!/^[0-9a-fA-F]{64}$/.test(no0x)) {
+    throw new Error('Invalid private key format');
+  }
+  return `0x${no0x}`;
 }
 
 serve(async (req) => {
@@ -145,6 +155,21 @@ serve(async (req) => {
             wallet: wallet.wallet_address,
             success: false,
             error: `No private key configured for chain ${chainId}`
+          });
+        }
+        continue;
+      }
+
+      // Normalize (accept with or without 0x)
+      try {
+        privateKey = normalizePrivateKey(privateKey);
+      } catch {
+        console.error(`Invalid private key format for chain ${chainId}`);
+        for (const wallet of chainWallets) {
+          results.push({
+            wallet: wallet.wallet_address,
+            success: false,
+            error: `Invalid private key format for chain ${chainId}`
           });
         }
         continue;

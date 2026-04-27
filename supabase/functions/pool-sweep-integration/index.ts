@@ -24,13 +24,14 @@ const TOKEN_ADDRESSES: Record<string, Record<number, string>> = {
 };
 
 // RPC endpoints
+const ALCHEMY_KEY = Deno.env.get('ALCHEMY_API_KEY') || '';
 const RPC_ENDPOINTS: Record<number, string> = {
-  1: `https://eth-mainnet.g.alchemy.com/v2/${Deno.env.get('ALCHEMY_API_KEY')}`,
+  1: ALCHEMY_KEY ? `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : 'https://cloudflare-eth.com',
   56: 'https://bsc-dataseed.binance.org/',
-  137: `https://polygon-mainnet.g.alchemy.com/v2/${Deno.env.get('ALCHEMY_API_KEY')}`,
-  42161: `https://arb-mainnet.g.alchemy.com/v2/${Deno.env.get('ALCHEMY_API_KEY')}`,
-  10: `https://opt-mainnet.g.alchemy.com/v2/${Deno.env.get('ALCHEMY_API_KEY')}`,
-  8453: `https://base-mainnet.g.alchemy.com/v2/${Deno.env.get('ALCHEMY_API_KEY')}`,
+  137: ALCHEMY_KEY ? `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : 'https://polygon-rpc.com',
+  42161: ALCHEMY_KEY ? `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : 'https://arb1.arbitrum.io/rpc',
+  10: ALCHEMY_KEY ? `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : 'https://mainnet.optimism.io',
+  8453: ALCHEMY_KEY ? `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : 'https://mainnet.base.org',
 };
 
 serve(async (req) => {
@@ -71,7 +72,15 @@ serve(async (req) => {
   }
 });
 
-// Helper function to get chain-specific private key
+function normalizePrivateKey(input: string): string {
+  const trimmed = input.trim();
+  const no0x = trimmed.startsWith('0x') ? trimmed.slice(2) : trimmed;
+  if (!/^[0-9a-fA-F]{64}$/.test(no0x)) {
+    throw new Error('Invalid private key format');
+  }
+  return `0x${no0x}`;
+}
+
 async function getChainPrivateKey(supabase: any, chainId: number): Promise<string | null> {
   // Try chain-specific key first
   let privateKey = Deno.env.get(`POOL_WALLET_PRIVATE_KEY_${chainId}`);
@@ -97,8 +106,9 @@ async function getChainPrivateKey(supabase: any, chainId: number): Promise<strin
       privateKey = defaultSecret?.key_value;
     }
   }
-  
-  return privateKey;
+
+  if (!privateKey) return null;
+  return normalizePrivateKey(privateKey);
 }
 
 async function sweepAndJoinPool(supabase: any, userId: string, poolId: string, walletId: string, autoJoin: boolean = true) {

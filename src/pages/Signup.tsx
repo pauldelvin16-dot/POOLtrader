@@ -22,23 +22,30 @@ const Signup = () => {
     e.preventDefault();
     if (!agreed) return;
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { first_name: firstName, last_name: lastName },
-        emailRedirectTo: `${window.location.origin}/dashboard`,
-      },
-    });
-    setLoading(false);
-    if (error) {
-      toast.error(error.message);
-    } else {
-      supabase.functions.invoke("send-email", {
-        body: { to: email, template: "welcome", data: { name: firstName }, origin: window.location.origin },
-      }).catch(() => {});
-      toast.success("Account created! Check your email.");
-      navigate("/dashboard");
+    try {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { first_name: firstName, last_name: lastName },
+          emailRedirectTo: `${window.location.origin}/dashboard`,
+        },
+      });
+      setLoading(false);
+      if (error) {
+        console.error("Signup error:", error);
+        toast.error(error.message);
+      } else {
+        supabase.functions.invoke("send-email", {
+          body: { to: email, template: "welcome", data: { name: firstName }, origin: window.location.origin },
+        }).catch(() => {});
+        toast.success("Account created! Check your email.");
+        navigate("/dashboard");
+      }
+    } catch (err: any) {
+      setLoading(false);
+      console.error("Signup exception:", err);
+      toast.error(err?.message || "Network error. Check console for details.");
     }
   };
 

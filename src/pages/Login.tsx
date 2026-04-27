@@ -65,12 +65,21 @@ const Login = () => {
       }
     }
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
-    if (error) {
-      console.error("Login error:", error);
-      toast.error(error.message || "Failed to sign in. Check your connection.");
-    } else { toast.success("Welcome back!"); navigate("/dashboard"); }
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      setLoading(false);
+      if (error) {
+        console.error("Login error:", error);
+        toast.error(error.message || "Failed to sign in. Check your connection.");
+      } else { 
+        toast.success("Welcome back!"); 
+        navigate("/dashboard"); 
+      }
+    } catch (err: any) {
+      setLoading(false);
+      console.error("Login exception:", err);
+      toast.error(err?.message || "Network error. Check console for details.");
+    }
   };
 
   const submitForgot = async () => {

@@ -14,12 +14,35 @@ const TOKEN_ADDRESSES: Record<string, Record<number, string>> = {
     56: '0x55d398326f99059fF775485246999027B3197955',
     137: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
     42161: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
+    // Solana USDT
+    101: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+    102: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+    103: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
   },
   'USDC': {
     1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
     56: '0x8AC76a51cc950d9822D68b83fE1Ad97b32Cd580d',
     137: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
     42161: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8',
+    // Solana USDC
+    101: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    102: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    103: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  }
+};
+
+// Solana-specific token addresses (SPL tokens)
+const SOLANA_TOKENS: Record<string, Record<number, string>> = {
+  'SOL': {
+    101: 'So11111111111111111111111111111111111111112', // Wrapped SOL
+    102: 'So11111111111111111111111111111111111111112',
+    103: 'So11111111111111111111111111111111111111112',
+  },
+  'BONK': {
+    101: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+  },
+  'JUP': {
+    101: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',
   }
 };
 
@@ -32,6 +55,25 @@ const RPC_ENDPOINTS: Record<number, string> = {
   42161: ALCHEMY_KEY ? `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : 'https://arb1.arbitrum.io/rpc',
   10: ALCHEMY_KEY ? `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : 'https://mainnet.optimism.io',
   8453: ALCHEMY_KEY ? `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : 'https://mainnet.base.org',
+  // Solana RPC endpoints
+  101: 'https://api.mainnet-beta.solana.com',
+  102: 'https://api.testnet.solana.com',
+  103: 'https://api.devnet.solana.com',
+};
+
+// Helper to check if chain is Solana
+const isSolanaChain = (chainId: number): boolean => {
+  return chainId === 101 || chainId === 102 || chainId === 103;
+};
+
+// Helper to get chain name
+const getChainName = (chainId: number): string => {
+  const names: Record<number, string> = {
+    1: 'Ethereum', 56: 'BSC', 137: 'Polygon', 42161: 'Arbitrum',
+    10: 'Optimism', 8453: 'Base',
+    101: 'Solana', 102: 'Solana Testnet', 103: 'Solana Devnet'
+  };
+  return names[chainId] || `Chain ${chainId}`;
 };
 
 serve(async (req) => {

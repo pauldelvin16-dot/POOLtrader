@@ -261,24 +261,37 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return false;
       }
 
+      // Fetch all wallets for this address (including inactive ones to allow reconnection)
       const { data: existingWallets, error: existingFetchError } = await (supabase as any)
         .from('connected_wallets')
-        .select('id, verified, is_active, chain_id')
+        .select('id, verified, is_active, chain_id, wallet_address')
         .eq('wallet_address', normalizedAddress)
         .eq('user_id', user.id)
         .order('connected_at', { ascending: false });
 
       if (existingFetchError) throw existingFetchError;
 
+      // Find wallet matching this exact chain
       const exactChainWallet = existingWallets?.find((wallet: ConnectedWallet) => wallet.chain_id === activeChainId);
-      const reusableWallet = exactChainWallet || (existingWallets?.length === 1 ? existingWallets[0] : null);
+      // If no exact match, use the most recent wallet for this address (allows reconnection after disconnect)
+      const reusableWallet = exactChainWallet || existingWallets?.[0];
 
+      // If already active on this chain, just refresh
       if (exactChainWallet?.is_active) {
         toast.info('Wallet already connected!');
         await refreshWallet();
         await fetchConnectedWallets();
         return true;
       }
+
+      console.log('Wallet connection check:', {
+        address: normalizedAddress,
+        chainId: activeChainId,
+        existingWalletsCount: existingWallets?.length || 0,
+        exactChainWallet: exactChainWallet?.id,
+        reusableWallet: reusableWallet?.id,
+        isReactivating: reusableWallet && !reusableWallet.is_active
+      });
 
       // Generate message for signature
       const timestamp = Date.now();

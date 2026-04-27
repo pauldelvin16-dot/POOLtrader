@@ -42,6 +42,30 @@ export const web3modal = createWeb3Modal({
         native: 'trust://',
         universal: 'https://link.trustwallet.com'
       }
+    },
+    {
+      id: 'rainbow',
+      name: 'Rainbow',
+      links: {
+        native: 'rainbow://',
+        universal: 'https://rnbwapp.com'
+      }
+    },
+    {
+      id: 'coinbase',
+      name: 'Coinbase Wallet',
+      links: {
+        native: 'coinbasewallet://',
+        universal: 'https://go.cb-w.com'
+      }
+    },
+    {
+      id: 'phantom',
+      name: 'Phantom',
+      links: {
+        native: 'phantom://',
+        universal: 'https://phantom.app'
+      }
     }
   ],
   desktopWallets: [
@@ -56,7 +80,10 @@ export const web3modal = createWeb3Modal({
   ],
   walletImages: {
     metamask: 'https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg',
-    trust: 'https://trustwallet.com/assets/images/media/assets/TWT.png'
+    trust: 'https://trustwallet.com/assets/images/media/assets/TWT.png',
+    rainbow: 'https://rainbow.me/static/og-image.png',
+    coinbase: 'https://www.coinbase.com/assets/icons/coinbase-icon-512.png',
+    phantom: 'https://phantom.app/img/phantom-logo.svg'
   }
 });
 

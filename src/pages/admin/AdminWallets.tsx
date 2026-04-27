@@ -30,7 +30,7 @@ interface WalletWithProfile {
     first_name: string | null;
     last_name: string | null;
     email: string | null;
-    role: string;
+    user_roles?: { role: string }[];
   };
 }
 
@@ -51,7 +51,13 @@ const AdminWallets = () => {
         .from("connected_wallets")
         .select(`
           *,
-          profiles:user_id (id, first_name, last_name, email, role)
+          profiles:user_id!left (
+            id,
+            first_name,
+            last_name,
+            email,
+            user_roles(role)
+          )
         `)
         .order("connected_at", { ascending: false });
       
@@ -296,7 +302,7 @@ const AdminWallets = () => {
                         <div>
                           <p className="font-semibold text-sm">{w.profiles?.first_name || 'Anonymous'} {w.profiles?.last_name || 'User'}</p>
                           <p className="text-[10px] text-muted-foreground font-mono">{w.profiles?.email || w.user_id.slice(0, 8) + '...'}</p>
-                          {w.profiles?.role === 'admin' && (
+                          {w.profiles?.user_roles?.some((r) => r.role === 'admin') && (
                             <Badge variant="outline" className="text-[8px] mt-1">ADMIN</Badge>
                           )}
                         </div>

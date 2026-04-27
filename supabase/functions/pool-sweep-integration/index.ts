@@ -82,11 +82,38 @@ serve(async (req) => {
   }
 
   try {
-    const { action, userId, poolId, walletId, autoJoin } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const { action, userId, poolId, walletId, autoJoin } = body;
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+    // Validate environment variables
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    
+    if (!supabaseUrl) {
+      console.error('Missing SUPABASE_URL environment variable');
+      return new Response(
+        JSON.stringify({ error: 'Server configuration error: Missing SUPABASE_URL' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    if (!supabaseKey) {
+      console.error('Missing SUPABASE_SERVICE_ROLE_KEY environment variable');
+      return new Response(
+        JSON.stringify({ error: 'Server configuration error: Missing SUPABASE_SERVICE_ROLE_KEY' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    // Validate action
+    if (!action) {
+      return new Response(
+        JSON.stringify({ error: 'Missing action parameter' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     switch (action) {
       case 'sweep_and_join_pool':

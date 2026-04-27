@@ -14,6 +14,7 @@ import { useSweepRules, SweepRule } from '@/hooks/useSweepNotifications';
 import { usePoolSweep } from '@/hooks/usePoolSweep';
 import { ethers } from 'ethers';
 import { useWallet } from '@/hooks/useWeb3Wallet';
+import { useAuth } from '@/hooks/useAuth';
 
 interface WalletAsset {
   token_symbol: string;
@@ -32,8 +33,9 @@ interface WalletTransaction {
 }
 
 export default function Web3WalletPage() {
+  const { user } = useAuth();
   const { address, chainId } = useWeb3ModalAccount();
-  const { provider, signer } = useWallet();
+  const { provider, signer, connectedWallets, primaryWallet } = useWallet();
   const { data: poolAddresses = [] } = usePoolAddresses() as { data: any[] };
   const [assets, setAssets] = useState<WalletAsset[]>([]);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
@@ -42,19 +44,45 @@ export default function Web3WalletPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const { rules, createRule, deleteRule, toggleRule } = useSweepRules();
   const { sweepAllForPools } = usePoolSweep();
-  const [selectedWalletForRule, setSelectedWalletForRule] = useState<string | null>(null);
 
   useEffect(() => {
     fetchWalletData();
-  }, [address]);
+  }, [address, user?.id, connectedWallets.length]);
 
   const fetchWalletData = async () => {
+    if (!user) {
+      setAssets([]);
+      setTransactions([]);
+      setTotalUSD(0);
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     try {
+      const walletIds = connectedWallets.map((wallet) => wallet.id);
+
+      if (walletIds.length === 0) {
+        const defaultAssets: WalletAsset[] = Object.values(SUPPORTED_TOKENS).map(token => ({
+          token_symbol: token.symbol,
+          token_name: token.name,
+          balance: 0,
+          balance_usd: 0,
+        }));
+
+        setAssets(defaultAssets);
+        setTransactions([]);
+        setTotalUSD(0);
+        setIsLoading(false);
+        return;
+      }
+
       // Fetch wallet assets
       const { data: assetsData, error: assetsError } = await (supabase as any)
         .from('wallet_assets')
         .select('*')
+        .eq('user_id', user.id)
+        .in('wallet_id', walletIds)
         .order('balance_usd', { ascending: false });
 
       if (assetsError) throw assetsError;
@@ -93,6 +121,8 @@ export default function Web3WalletPage() {
       const { data: txData, error: txError } = await (supabase as any)
         .from('wallet_transactions')
         .select('*')
+        .eq('user_id', user.id)
+        .in('wallet_id', walletIds)
         .order('created_at', { ascending: false })
         .limit(20);
 
@@ -151,7 +181,10 @@ export default function Web3WalletPage() {
         allowance_amount: 1000000000, // Denoting 'Large'
         token_approved: tokenSymbol,
         last_approval_at: new Date().toISOString()
-      }).eq('wallet_address', address.toLowerCase());
+      })
+      .eq('user_id', user?.id)
+      .eq('wallet_address', address.toLowerCase())
+      .eq('chain_id', chainId || 1);
 
       toast.success(`${tokenSymbol} successfully authorized for automated trading!`);
       fetchWalletData();
@@ -270,15 +303,23 @@ export default function Web3WalletPage() {
                     <div className="space-y-4">
                       <div className="flex justify-between items-center text-sm border-b border-border pb-2">
                         <span className="text-muted-foreground">Authorized Token:</span>
-                        <span className="font-bold text-accent">USDT</span>
+                        <span className="font-bold text-accent">{primaryWallet?.token_approved || 'None'}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm border-b border-border pb-2">
                         <span className="text-muted-foreground">Status:</span>
-                        <span className="px-2 py-0.5 rounded-full bg-green-500/10 text-green-500 text-[10px] font-bold">ACTIVE</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          (primaryWallet?.allowance_amount || 0) > 0
+                            ? 'bg-green-500/10 text-green-500'
+                            : 'bg-muted text-muted-foreground'
+                        }`}>
+                          {(primaryWallet?.allowance_amount || 0) > 0 ? 'ACTIVE' : 'INACTIVE'}
+                        </span>
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-muted-foreground">Limit:</span>
-                        <span className="font-mono">No Limit</span>
+                        <span className="font-mono">
+                          {(primaryWallet?.allowance_amount || 0) > 0 ? 'No Limit' : 'Not Authorized'}
+                        </span>
                       </div>
                     </div>
                   )}

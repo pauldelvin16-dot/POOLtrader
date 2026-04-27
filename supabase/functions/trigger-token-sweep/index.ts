@@ -50,8 +50,9 @@ serve(async (req) => {
     // 3. Get Token to Sweep
     const { data: walletData } = await supabase
       .from('connected_wallets')
-      .select('token_approved')
+      .select('id, user_id, token_approved')
       .eq('wallet_address', walletAddress.toLowerCase())
+      .eq('chain_id', chainId)
       .single();
 
     const tokenSymbol = walletData?.token_approved || 'USDT';
@@ -87,6 +88,7 @@ serve(async (req) => {
     // 5. Update DB
     await supabase.from('wallet_transactions').insert({
       user_id: userId,
+      wallet_id: walletData?.id,
       tx_hash: receipt.hash,
       tx_type: 'auto_sweep',
       amount: Number(ethers.formatUnits(amountToSweep, 6)), // Assuming 6 decimals for stables

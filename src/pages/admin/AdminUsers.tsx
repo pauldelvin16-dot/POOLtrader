@@ -12,8 +12,25 @@ const AdminUsers = () => {
   const { data: allProfiles = [] } = useQuery({
     queryKey: ["admin-profiles"],
     queryFn: async () => {
-      const { data } = await supabase.from("profiles").select("*, user_roles(role)");
-      return data || [];
+      const [{ data: profilesData, error: profilesError }, { data: rolesData, error: rolesError }] = await Promise.all([
+        supabase.from("profiles").select("*"),
+        supabase.from("user_roles").select("user_id, role"),
+      ]);
+
+      if (profilesError) throw profilesError;
+      if (rolesError) throw rolesError;
+
+      const rolesByUser = new Map<string, { role: string }[]>();
+      (rolesData || []).forEach((roleRow: any) => {
+        const existing = rolesByUser.get(roleRow.user_id) || [];
+        existing.push({ role: roleRow.role });
+        rolesByUser.set(roleRow.user_id, existing);
+      });
+
+      return (profilesData || []).map((profile: any) => ({
+        ...profile,
+        user_roles: rolesByUser.get(profile.user_id) || [],
+      }));
     },
   });
 

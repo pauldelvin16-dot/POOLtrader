@@ -72,12 +72,13 @@ export function WalletManagement() {
       toast.error('Please connect your wallet using the Web3 button first');
       return;
     }
-    await connectWallet('walletconnect');
+    await connectWallet();
   };
 
   const isWalletConnected = (address: string) => {
     return connectedWallets.some(w => 
-      w.wallet_address.toLowerCase() === address.toLowerCase()
+      w.wallet_address.toLowerCase() === address.toLowerCase() &&
+      (!currentChainId || w.chain_id === currentChainId)
     );
   };
 

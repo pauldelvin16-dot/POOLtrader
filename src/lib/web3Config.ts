@@ -62,12 +62,14 @@ export const CHAIN_NAMES: Record<number, string> = {
 export const WALLET_TYPES = [
   'metamask',
   'trust-wallet',
+  'coinbase',
   'walletconnect',
   'phantom',
   'exodus',
   'safepal',
   'halo',
   'defi-wallet',
+  'browser-wallet',
 ];
 
 export const SUPPORTED_TOKENS = {

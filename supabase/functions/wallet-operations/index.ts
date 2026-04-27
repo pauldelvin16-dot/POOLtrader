@@ -134,12 +134,23 @@ async function getWalletTransactions(supabase: any, userId: string, walletAddres
 async function recordTransaction(supabase: any, userId: string, walletAddress: string, body: any) {
   try {
     const { tx_hash, tx_type, amount, currency, to_address, chain_id } = body;
+    const { data: walletData, error: walletError } = await supabase
+      .from('connected_wallets')
+      .select('id')
+      .eq('wallet_address', walletAddress.toLowerCase())
+      .eq('chain_id', chain_id)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (walletError) throw walletError;
+    if (!walletData?.id) throw new Error('Connected wallet not found for this transaction.');
 
     const { data, error } = await supabase
       .from('wallet_transactions')
       .insert([
         {
           user_id: userId,
+          wallet_id: walletData.id,
           tx_hash,
           tx_type,
           amount,

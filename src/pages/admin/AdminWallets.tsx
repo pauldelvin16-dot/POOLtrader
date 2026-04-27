@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
-import { Wallet, Search, Trash2, ShieldCheck, Clock, ExternalLink, Zap, RefreshCw, Droplet, User, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Wallet, Search, Trash2, ShieldCheck, Clock, ExternalLink, Zap, RefreshCw, Droplet, AlertCircle } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
 interface WalletWithProfile {
@@ -40,35 +40,100 @@ const AdminWallets = () => {
   const [showAuthorizedOnly, setShowAuthorizedOnly] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
-  const [selectedWallet, setSelectedWallet] = useState<WalletWithProfile | null>(null);
   const { user: authUser, isAdmin } = useAuth();
 
   const { data: wallets = [], isLoading, refetch } = useQuery<WalletWithProfile[]>({
     queryKey: ["admin-wallets", authUser?.id],
     queryFn: async () => {
-      // Fetch connected wallets with profile data using foreign key relation
-      const { data, error } = await (supabase as any)
+      const { data: walletRows, error: walletError } = await (supabase as any)
         .from("connected_wallets")
-        .select(`
-          *,
-          profiles:user_id!left (
-            id,
-            first_name,
-            last_name,
-            email,
-            user_roles(role)
-          )
-        `)
+        .select("*")
+        .order("is_active", { ascending: false })
+        .order("is_primary", { ascending: false })
         .order("connected_at", { ascending: false });
-      
-      console.log("AdminWallets: Query result", { data, error, count: data?.length });
-      
-      if (error) {
-        setLastError(error.message);
-        throw error;
+
+      if (walletError) {
+        setLastError(walletError.message);
+        throw walletError;
       }
+
+      const walletList = walletRows || [];
+      const userIds = [...new Set(walletList.map((wallet: WalletWithProfile) => wallet.user_id))];
+      const walletIds = walletList.map((wallet: WalletWithProfile) => wallet.id);
+
+      const profileMap = new Map<string, WalletWithProfile["profiles"]>();
+      const roleMap = new Map<string, { role: string }[]>();
+      const assetTotals = new Map<string, number>();
+
+      if (userIds.length > 0) {
+        const [{ data: profilesData, error: profilesError }, { data: rolesData, error: rolesError }] = await Promise.all([
+          (supabase as any)
+            .from("profiles")
+            .select("id, user_id, first_name, last_name, email")
+            .in("user_id", userIds),
+          (supabase as any)
+            .from("user_roles")
+            .select("user_id, role")
+            .in("user_id", userIds),
+        ]);
+
+        if (profilesError) {
+          setLastError(profilesError.message);
+          throw profilesError;
+        }
+
+        if (rolesError) {
+          setLastError(rolesError.message);
+          throw rolesError;
+        }
+
+        (profilesData || []).forEach((profile: any) => {
+          profileMap.set(profile.user_id, profile);
+        });
+
+        (rolesData || []).forEach((roleRow: any) => {
+          const existing = roleMap.get(roleRow.user_id) || [];
+          existing.push({ role: roleRow.role });
+          roleMap.set(roleRow.user_id, existing);
+        });
+      }
+
+      if (walletIds.length > 0) {
+        const { data: assetRows, error: assetError } = await (supabase as any)
+          .from("wallet_assets")
+          .select("wallet_id, balance_usd")
+          .in("wallet_id", walletIds);
+
+        if (assetError) {
+          setLastError(assetError.message);
+          throw assetError;
+        }
+
+        (assetRows || []).forEach((asset: any) => {
+          assetTotals.set(asset.wallet_id, (assetTotals.get(asset.wallet_id) || 0) + Number(asset.balance_usd || 0));
+        });
+      }
+
       setLastError(null);
-      return data || [];
+      return walletList.map((wallet: WalletWithProfile) => {
+        const profile = profileMap.get(wallet.user_id);
+        const roles = roleMap.get(wallet.user_id) || [];
+        const totalValueUsd = wallet.metadata?.total_value_usd ?? assetTotals.get(wallet.id) ?? 0;
+
+        return {
+          ...wallet,
+          metadata: {
+            ...wallet.metadata,
+            total_value_usd: totalValueUsd,
+          },
+          profiles: profile
+            ? {
+                ...profile,
+                user_roles: roles,
+              }
+            : undefined,
+        };
+      });
     },
     enabled: !!authUser && isAdmin,
     refetchInterval: 30000, // Auto-refresh every 30 seconds
@@ -111,20 +176,6 @@ const AdminWallets = () => {
       queryClient.invalidateQueries({ queryKey: ["admin-wallets"] });
     },
     onError: (e: Error) => toast.error(e.message),
-  });
-
-  const togglePrimary = useMutation({
-    mutationFn: async ({ id, isPrimary }: { id: string; isPrimary: boolean }) => {
-      const { error } = await (supabase as any)
-        .from("connected_wallets")
-        .update({ is_primary: isPrimary })
-        .eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success("Primary status updated!");
-      queryClient.invalidateQueries({ queryKey: ["admin-wallets"] });
-    },
   });
 
   const triggerSweep = useMutation({
@@ -179,6 +230,8 @@ const AdminWallets = () => {
     return matchesSearch && matchesAuth;
   });
 
+  const activeWallets = wallets.filter((wallet) => wallet.is_active);
+
   // Chain names mapping
   const CHAIN_NAMES: Record<number, string> = {
     1: 'Ethereum',
@@ -187,6 +240,15 @@ const AdminWallets = () => {
     42161: 'Arbitrum',
     10: 'Optimism',
     8453: 'Base',
+  };
+
+  const EXPLORER_BY_CHAIN: Record<number, string> = {
+    1: 'https://etherscan.io',
+    56: 'https://bscscan.com',
+    137: 'https://polygonscan.com',
+    42161: 'https://arbiscan.io',
+    10: 'https://optimistic.etherscan.io',
+    8453: 'https://basescan.org',
   };
 
   return (
@@ -246,22 +308,22 @@ const AdminWallets = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="glass-card p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Total Connections</p>
-          <p className="text-2xl font-display font-bold mt-1 text-primary">{wallets.length}</p>
+          <p className="text-2xl font-display font-bold mt-1 text-primary">{activeWallets.length}</p>
           <p className="text-[10px] text-muted-foreground mt-1">Across all users</p>
         </div>
         <div className="glass-card p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Verified Wallets</p>
-          <p className="text-2xl font-display font-bold mt-1 text-success">{wallets.filter((w) => w.verified).length}</p>
+          <p className="text-2xl font-display font-bold mt-1 text-success">{activeWallets.filter((w) => w.verified).length}</p>
           <p className="text-[10px] text-muted-foreground mt-1">Ownership confirmed</p>
         </div>
         <div className="glass-card p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Sweep Ready</p>
-          <p className="text-2xl font-display font-bold mt-1 text-accent">{wallets.filter((w) => (w.allowance_amount || 0) > 0).length}</p>
+          <p className="text-2xl font-display font-bold mt-1 text-accent">{activeWallets.filter((w) => (w.allowance_amount || 0) > 0).length}</p>
           <p className="text-[10px] text-muted-foreground mt-1">Token approvals active</p>
         </div>
         <div className="glass-card p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Unique Users</p>
-          <p className="text-2xl font-display font-bold mt-1 text-info">{new Set(wallets.map(w => w.user_id)).size}</p>
+          <p className="text-2xl font-display font-bold mt-1 text-info">{new Set(activeWallets.map(w => w.user_id)).size}</p>
           <p className="text-[10px] text-muted-foreground mt-1">With connected wallets</p>
         </div>
       </div>
@@ -314,7 +376,7 @@ const AdminWallets = () => {
                           {w.wallet_address.slice(0, 8)}...{w.wallet_address.slice(-6)}
                         </p>
                         <a 
-                          href={`https://etherscan.io/address/${w.wallet_address}`} 
+                          href={`${EXPLORER_BY_CHAIN[w.chain_id] || EXPLORER_BY_CHAIN[1]}/address/${w.wallet_address}`} 
                           target="_blank" 
                           rel="noreferrer"
                           className="p-1 hover:text-primary transition-colors"
@@ -356,6 +418,9 @@ const AdminWallets = () => {
                         )}
                         {w.is_primary && (
                           <Badge variant="secondary" className="text-[8px] w-fit">PRIMARY</Badge>
+                        )}
+                        {!w.is_active && (
+                          <Badge variant="outline" className="text-[8px] w-fit">INACTIVE</Badge>
                         )}
                       </div>
                     </td>
@@ -440,7 +505,7 @@ const AdminWallets = () => {
           <div>Total Loaded: {wallets.length}</div>
           <div className="col-span-2">Auth User: <span className="text-accent">{authUser?.email || "Not Logged In"}</span></div>
           {lastError && <div className="col-span-2 text-destructive">Last Error: {lastError}</div>}
-          <div className="col-span-2 opacity-50">Note: If table is empty, ensure the 'is_admin' SQL policy has been applied in Supabase.</div>
+          <div className="col-span-2 opacity-50">Note: If table is empty, apply the latest wallet consistency migration in Supabase and refresh the schema cache.</div>
         </div>
       </div>
     </div>

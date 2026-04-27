@@ -55,19 +55,39 @@ const AdminSweepAnalytics = () => {
   const { data: recentSweeps = [] } = useQuery({
     queryKey: ["recent-sweeps"],
     queryFn: async () => {
-      const { data, error } = await (supabase as any)
+      const { data: sweepRows, error } = await (supabase as any)
         .from("wallet_transactions")
-        .select(`
-          *,
-          wallet:wallet_id (wallet_address, wallet_type),
-          user:user_id (email, first_name, last_name)
-        `)
+        .select("*")
         .eq("tx_type", "pool_sweep")
         .order("created_at", { ascending: false })
         .limit(50);
 
       if (error) throw error;
-      return data || [];
+
+      const sweeps = sweepRows || [];
+      const walletIds = [...new Set(sweeps.map((sweep: any) => sweep.wallet_id).filter(Boolean))];
+      const userIds = [...new Set(sweeps.map((sweep: any) => sweep.user_id).filter(Boolean))];
+
+      const [{ data: walletRows, error: walletError }, { data: profileRows, error: profileError }] = await Promise.all([
+        walletIds.length > 0
+          ? (supabase as any).from("connected_wallets").select("id, wallet_address, wallet_type").in("id", walletIds)
+          : Promise.resolve({ data: [], error: null }),
+        userIds.length > 0
+          ? (supabase as any).from("profiles").select("user_id, email, first_name, last_name").in("user_id", userIds)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      if (walletError) throw walletError;
+      if (profileError) throw profileError;
+
+      const walletMap = new Map((walletRows || []).map((wallet: any) => [wallet.id, wallet]));
+      const profileMap = new Map((profileRows || []).map((profile: any) => [profile.user_id, profile]));
+
+      return sweeps.map((sweep: any) => ({
+        ...sweep,
+        wallet: walletMap.get(sweep.wallet_id),
+        user: profileMap.get(sweep.user_id),
+      }));
     },
   });
 

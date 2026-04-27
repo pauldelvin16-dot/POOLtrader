@@ -43,6 +43,12 @@ interface WalletContextType {
   signer: any;
   currentChainId: number | undefined;
   currentAddress: string | undefined;
+  // Wallet detection utilities
+  isWalletInstalled: (walletType: string) => boolean;
+  getInstalledWallets: () => string[];
+  isMobile: () => boolean;
+  openWalletDeepLink: (walletType: string, wcUri?: string) => void;
+  detectWalletType: (provider: unknown) => string;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -53,20 +59,104 @@ const detectWalletType = (walletProvider: unknown): string => {
   const provider = walletProvider as Record<string, any> | null;
   if (!provider) return 'walletconnect';
 
-  if (provider.isMetaMask) return 'metamask';
+  // Check for specific wallet flags
+  if (provider.isPhantom) return 'phantom';
+  if (provider.isMetaMask && !provider.isTrust && !provider.isSafePal) return 'metamask';
   if (provider.isTrust || provider.isTrustWallet) return 'trust-wallet';
   if (provider.isCoinbaseWallet) return 'coinbase';
-  if (provider.isPhantom) return 'phantom';
   if (provider.isExodus) return 'exodus';
   if (provider.isSafePal) return 'safepal';
-  if (provider.session || provider.connector || provider.signer?.session) return 'walletconnect';
-
-  if (typeof navigator !== 'undefined') {
-    const mobileUserAgent = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
-    if (mobileUserAgent) return 'walletconnect';
-  }
+  
+  // Check provider name/constructor name for additional detection
+  const providerName = provider.name || provider.constructor?.name || '';
+  if (/phantom/i.test(providerName)) return 'phantom';
+  if (/metamask/i.test(providerName) && !provider.isTrust) return 'metamask';
+  if (/trust/i.test(providerName)) return 'trust-wallet';
+  if (/exodus/i.test(providerName)) return 'exodus';
+  if (/safepal/i.test(providerName)) return 'safepal';
+  
+  // WalletConnect detection (has session/connector)
+  if (provider.session || provider.connector || provider.signer?.session || provider.uri) return 'walletconnect';
 
   return 'browser-wallet';
+};
+
+// Check if specific wallet is installed
+const isWalletInstalled = (walletType: string): boolean => {
+  if (typeof window === 'undefined') return false;
+  
+  const ethereum = (window as any).ethereum;
+  const phantom = (window as any).phantom;
+  const solana = (window as any).solana;
+  
+  switch (walletType) {
+    case 'metamask':
+      return ethereum?.isMetaMask && !ethereum?.isTrust && !ethereum?.isSafePal;
+    case 'trust-wallet':
+      return ethereum?.isTrust || ethereum?.isTrustWallet || /trust/i.test(navigator.userAgent);
+    case 'phantom':
+      return phantom?.ethereum?.isPhantom || phantom?.isPhantom || ethereum?.isPhantom || solana?.isPhantom;
+    case 'exodus':
+      return ethereum?.isExodus || (window as any).exodus?.ethereum?.isExodus;
+    case 'safepal':
+      return ethereum?.isSafePal || /safepal/i.test(navigator.userAgent);
+    case 'coinbase':
+      return ethereum?.isCoinbaseWallet;
+    default:
+      return false;
+  }
+};
+
+// Get all installed wallets
+const getInstalledWallets = (): string[] => {
+  const wallets: string[] = [];
+  const walletTypes = ['metamask', 'trust-wallet', 'phantom', 'exodus', 'safepal', 'coinbase'];
+  
+  for (const wallet of walletTypes) {
+    if (isWalletInstalled(wallet)) {
+      wallets.push(wallet);
+    }
+  }
+  
+  return wallets;
+};
+
+// Check if running on mobile
+const isMobile = (): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+};
+
+// Open wallet deep link
+const openWalletDeepLink = (walletType: string, wcUri?: string): void => {
+  if (typeof window === 'undefined') return;
+  
+  const currentUrl = encodeURIComponent(window.location.href);
+  const encodedUri = wcUri ? encodeURIComponent(wcUri) : '';
+  
+  const deepLinks: Record<string, string> = {
+    'metamask': wcUri 
+      ? `metamask://wc?uri=${encodedUri}` 
+      : `https://metamask.app.link/dapp/${window.location.host}${window.location.pathname}`,
+    'trust-wallet': wcUri
+      ? `trust://wc?uri=${encodedUri}`
+      : `https://link.trustwallet.com/open_url?coin_id=60&url=${currentUrl}`,
+    'phantom': wcUri
+      ? `phantom://browse/${window.location.host}${window.location.pathname}?wc=${encodedUri}`
+      : `https://phantom.app/ul/browse/${window.location.host}${window.location.pathname}`,
+    'exodus': wcUri
+      ? `exodus://wc?uri=${encodedUri}`
+      : `https://exodus.com/download/`,
+    'safepal': wcUri
+      ? `safepal://wc?uri=${encodedUri}`
+      : `https://www.safepal.com/download`,
+  };
+  
+  const link = deepLinks[walletType];
+  if (link) {
+    console.log(`Opening deep link for ${walletType}:`, link);
+    window.location.href = link;
+  }
 };
 
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -507,6 +597,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     signer,
     currentChainId: chainId,
     currentAddress: address,
+    // Wallet detection utilities
+    isWalletInstalled,
+    getInstalledWallets,
+    isMobile,
+    openWalletDeepLink,
+    detectWalletType,
   };
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;

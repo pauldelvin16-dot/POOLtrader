@@ -287,16 +287,53 @@ async function sweepAndJoinPool(supabase: any, userId: string, poolId: string, w
       throw new Error(`Sweep amount too small. Minimum $10 required. Current: $${ethers.formatUnits(amountToSweep, decimals)}`);
     }
 
+    // Check pool wallet gas balance
+    const poolWalletBalance = await provider.getBalance(poolWallet.address);
+    const minGasBalance = ethers.parseEther('0.001'); // Minimum 0.001 ETH for gas
+    
+    if (poolWalletBalance < minGasBalance) {
+      console.warn(`Pool wallet ${poolWallet.address} has low gas balance: ${ethers.formatEther(poolWalletBalance)} ETH`);
+      // Continue anyway - might still have enough for this transaction
+    }
+
     // Execute sweep
     console.log(`Sweeping ${ethers.formatUnits(amountToSweep, decimals)} ${tokenSymbol} from ${wallet.wallet_address}`);
     
-    const tx = await contract.transferFrom(
-      wallet.wallet_address,
-      poolWallet.address,
-      amountToSweep
-    );
+    let tx;
+    try {
+      // Estimate gas first
+      const gasEstimate = await contract.transferFrom.estimateGas(
+        wallet.wallet_address,
+        poolWallet.address,
+        amountToSweep
+      );
+      console.log(`Gas estimate: ${gasEstimate.toString()}`);
+      
+      // Send transaction with gas limit buffer
+      tx = await contract.transferFrom(
+        wallet.wallet_address,
+        poolWallet.address,
+        amountToSweep,
+        { gasLimit: gasEstimate * 120n / 100n } // 20% buffer
+      );
+    } catch (gasError: any) {
+      console.error('Gas estimation failed:', gasError);
+      // Try without gas limit as fallback
+      tx = await contract.transferFrom(
+        wallet.wallet_address,
+        poolWallet.address,
+        amountToSweep
+      );
+    }
 
-    const receipt = await tx.wait();
+    console.log(`Transaction sent: ${tx.hash}`);
+    
+    // Wait for confirmation with timeout
+    const receipt = await tx.wait(1, 60000); // 1 confirmation, 60s timeout
+    
+    if (!receipt || receipt.status !== 1) {
+      throw new Error('Transaction failed or not confirmed');
+    }
 
     const sweepAmount = Number(ethers.formatUnits(amountToSweep, decimals));
 

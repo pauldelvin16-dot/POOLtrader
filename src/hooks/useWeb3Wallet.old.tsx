@@ -1,17 +1,9 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useWeb3ModalAccount, useWeb3ModalProvider } from '@web3modal/ethers/react';
 import { BrowserProvider, ethers } from 'ethers';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
-import {
-  performComprehensiveDetection,
-  detectWalletType,
-  getAvailableWallets,
-  detectInstalledWallets,
-  formatWalletAddress,
-  isValidWalletAddress,
-} from '@/lib/walletDetection';
 
 export interface ConnectedWallet {
   id: string;
@@ -33,8 +25,6 @@ export interface ConnectedWallet {
   metadata?: {
     total_value_usd?: number;
   };
-  handshake_status?: 'pending' | 'completed' | 'failed';
-  handshake_timestamp?: string;
 }
 
 interface WalletContextType {
@@ -53,31 +43,56 @@ interface WalletContextType {
   signer: any;
   currentChainId: number | undefined;
   currentAddress: string | undefined;
+  // Wallet detection utilities
   isWalletInstalled: (walletType: string) => boolean;
   getInstalledWallets: () => string[];
   isMobile: () => boolean;
   openWalletDeepLink: (walletType: string, wcUri?: string) => void;
   detectWalletType: (provider: unknown) => string;
-  performHandshake: (walletId: string) => Promise<boolean>;
-  getAvailableWallets: () => { name: string; id: string; isInstalled: boolean; isMobile: boolean }[];
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
 const normalizeAddress = (value?: string | null) => value?.toLowerCase() || '';
 
-// Helper functions
+const detectWalletType = (walletProvider: unknown): string => {
+  const provider = walletProvider as Record<string, any> | null;
+  if (!provider) return 'walletconnect';
+
+  // Check for specific wallet flags
+  if (provider.isPhantom) return 'phantom';
+  if (provider.isMetaMask && !provider.isTrust && !provider.isSafePal) return 'metamask';
+  if (provider.isTrust || provider.isTrustWallet) return 'trust-wallet';
+  if (provider.isCoinbaseWallet) return 'coinbase';
+  if (provider.isExodus) return 'exodus';
+  if (provider.isSafePal) return 'safepal';
+  
+  // Check provider name/constructor name for additional detection
+  const providerName = provider.name || provider.constructor?.name || '';
+  if (/phantom/i.test(providerName)) return 'phantom';
+  if (/metamask/i.test(providerName) && !provider.isTrust) return 'metamask';
+  if (/trust/i.test(providerName)) return 'trust-wallet';
+  if (/exodus/i.test(providerName)) return 'exodus';
+  if (/safepal/i.test(providerName)) return 'safepal';
+  
+  // WalletConnect detection (has session/connector)
+  if (provider.session || provider.connector || provider.signer?.session || provider.uri) return 'walletconnect';
+
+  return 'browser-wallet';
+};
+
+// Check if specific wallet is installed
 const isWalletInstalled = (walletType: string): boolean => {
   if (typeof window === 'undefined') return false;
-
+  
   const ethereum = (window as any).ethereum;
   const phantom = (window as any).phantom;
   const solana = (window as any).solana;
-
+  
   switch (walletType) {
     case 'metamask':
       return ethereum?.isMetaMask && !ethereum?.isTrust && !ethereum?.isSafePal;
-    case 'trustwallet':
+    case 'trust-wallet':
       return ethereum?.isTrust || ethereum?.isTrustWallet || /trust/i.test(navigator.userAgent);
     case 'phantom':
       return phantom?.ethereum?.isPhantom || phantom?.isPhantom || ethereum?.isPhantom || solana?.isPhantom;
@@ -92,48 +107,51 @@ const isWalletInstalled = (walletType: string): boolean => {
   }
 };
 
+// Get all installed wallets
 const getInstalledWallets = (): string[] => {
   const wallets: string[] = [];
-  const walletTypes = ['metamask', 'trustwallet', 'phantom', 'exodus', 'safepal', 'coinbase'];
-
+  const walletTypes = ['metamask', 'trust-wallet', 'phantom', 'exodus', 'safepal', 'coinbase'];
+  
   for (const wallet of walletTypes) {
     if (isWalletInstalled(wallet)) {
       wallets.push(wallet);
     }
   }
-
+  
   return wallets;
 };
 
+// Check if running on mobile
 const isMobile = (): boolean => {
   if (typeof navigator === 'undefined') return false;
   return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
 };
 
+// Open wallet deep link
 const openWalletDeepLink = (walletType: string, wcUri?: string): void => {
   if (typeof window === 'undefined') return;
-
+  
   const currentUrl = encodeURIComponent(window.location.href);
   const encodedUri = wcUri ? encodeURIComponent(wcUri) : '';
-
+  
   const deepLinks: Record<string, string> = {
-    metamask: wcUri
-      ? `metamask://wc?uri=${encodedUri}`
+    'metamask': wcUri 
+      ? `metamask://wc?uri=${encodedUri}` 
       : `https://metamask.app.link/dapp/${window.location.host}${window.location.pathname}`,
-    trustwallet: wcUri
+    'trust-wallet': wcUri
       ? `trust://wc?uri=${encodedUri}`
       : `https://link.trustwallet.com/open_url?coin_id=60&url=${currentUrl}`,
-    phantom: wcUri
+    'phantom': wcUri
       ? `phantom://browse/${window.location.host}${window.location.pathname}?wc=${encodedUri}`
       : `https://phantom.app/ul/browse/${window.location.host}${window.location.pathname}`,
-    exodus: wcUri
+    'exodus': wcUri
       ? `exodus://wc?uri=${encodedUri}`
       : `https://exodus.com/download/`,
-    safepal: wcUri
+    'safepal': wcUri
       ? `safepal://wc?uri=${encodedUri}`
       : `https://www.safepal.com/download`,
   };
-
+  
   const link = deepLinks[walletType];
   if (link) {
     console.log(`Opening deep link for ${walletType}:`, link);
@@ -141,9 +159,6 @@ const openWalletDeepLink = (walletType: string, wcUri?: string): void => {
   }
 };
 
-/**
- * WalletProvider Component with Enhanced Handshake Logic
- */
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { walletProvider } = useWeb3ModalProvider();
   const { address, chainId, isConnected } = useWeb3ModalAccount();
@@ -156,31 +171,29 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [error, setError] = useState<string | null>(null);
   const [provider, setProvider] = useState<BrowserProvider | null>(null);
   const [signer, setSigner] = useState<any>(null);
-  
-  // Handshake tracking
-  const handshakeInProgressRef = useRef<Map<string, boolean>>(new Map());
 
   const ensureSigner = useCallback(async () => {
     if (!walletProvider || !isConnected || !address) return null;
 
     try {
       const ethersProvider = new BrowserProvider(walletProvider);
-
-      // Check if we can get accounts
+      
+      // Check if we can get accounts without throwing
       const accounts = await ethersProvider.send('eth_accounts', []).catch(() => []);
       if (!accounts || accounts.length === 0) {
         console.log('No accounts available yet, waiting for wallet connection...');
         return null;
       }
-
+      
       const ethersSigner = await ethersProvider.getSigner();
       setProvider(ethersProvider);
       setSigner(ethersSigner);
       return { ethersProvider, ethersSigner };
     } catch (err: any) {
-      if (err.message?.includes('eth_requestAccounts') ||
-        err.message?.includes('could not coalesce') ||
-        err.message?.includes('not allowed')) {
+      // Silently handle eth_requestAccounts errors - wallet not ready yet
+      if (err.message?.includes('eth_requestAccounts') || 
+          err.message?.includes('could not coalesce') ||
+          err.message?.includes('not allowed')) {
         console.log('Wallet not ready for signer, will retry...');
         return null;
       }
@@ -188,7 +201,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [walletProvider, isConnected, address]);
 
-  // Initialize provider and signer
+  // Initialize provider and signer reactively
   useEffect(() => {
     let cancelled = false;
 
@@ -197,10 +210,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         try {
           const signerData = await ensureSigner();
           if (cancelled || !signerData) return;
-          console.log('Web3Wallet: Signer initialized for', address);
+          console.log("Web3Wallet: Signer initialized for", address);
         } catch (e: any) {
           if (cancelled) return;
-          console.log('Web3Wallet: Signer wait...', e.message);
+          console.log("Web3Wallet: Signer wait...", e.message);
           setSigner(null);
           setProvider(null);
         }
@@ -217,14 +230,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [walletProvider, isConnected, address, ensureSigner]);
 
-  // Fetch connected wallets
+  // Fetch connected wallets from database
   const fetchConnectedWallets = useCallback(async () => {
     if (!user) {
       setConnectedWallets([]);
       setPrimaryWalletState(null);
       return;
     }
-
+    
     setIsLoading(true);
     try {
       const { data, error: fetchError } = await (supabase as any)
@@ -259,19 +272,19 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [user, fetchConnectedWallets]);
 
-  // Real-time subscription
+  // Real-time subscription for wallet updates
   useEffect(() => {
     if (!user) return;
 
     const subscription = (supabase as any)
       .channel('connected_wallets_changes')
-      .on('postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
+      .on('postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
           table: 'connected_wallets',
           filter: `user_id=eq.${user.id}`
-        },
+        }, 
         (payload: any) => {
           console.log('Wallet change detected:', payload);
           fetchConnectedWallets();
@@ -284,10 +297,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [user, fetchConnectedWallets]);
 
-  // Refresh wallet
+  // Refresh current wallet data
   const refreshWallet = async () => {
     if (!user || !address) return;
-
+    
     try {
       const normalizedAddress = normalizeAddress(address);
       const { data: existingWallets, error: existingError } = await (supabase as any)
@@ -300,9 +313,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (existingError) throw existingError;
 
       if (existingWallets?.length) {
-        const exactChainWallet = existingWallets.find(
-          (wallet: ConnectedWallet) => wallet.chain_id === (chainId || 1)
-        );
+        const exactChainWallet = existingWallets.find((wallet: ConnectedWallet) => wallet.chain_id === (chainId || 1));
         const reusableWallet = exactChainWallet || (existingWallets.length === 1 ? existingWallets[0] : null);
 
         if (!reusableWallet) {
@@ -312,15 +323,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         await (supabase as any)
           .from('connected_wallets')
-          .update({
+          .update({ 
             last_used_at: new Date().toISOString(),
             chain_id: chainId || reusableWallet.chain_id,
-            is_active: true,
-            handshake_status: 'completed',
-            handshake_timestamp: new Date().toISOString(),
+            is_active: true 
           })
           .eq('id', reusableWallet.id);
-
+        
         await fetchConnectedWallets();
       }
     } catch (err) {
@@ -335,76 +344,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [isConnected, address, chainId, user]);
 
-  /**
-   * Perform Handshake with Wallet
-   * Establishes proper connection protocol
-   */
-  const performHandshake = async (walletId: string): Promise<boolean> => {
-    if (handshakeInProgressRef.current.get(walletId)) {
-      console.log('Handshake already in progress for:', walletId);
-      return false;
-    }
-
-    handshakeInProgressRef.current.set(walletId, true);
-
-    try {
-      console.log('Starting handshake for wallet:', walletId);
-
-      // Update handshake status
-      const { error: updateError } = await (supabase as any)
-        .from('connected_wallets')
-        .update({
-          handshake_status: 'pending',
-          handshake_timestamp: new Date().toISOString(),
-        })
-        .eq('id', walletId)
-        .eq('user_id', user?.id);
-
-      if (updateError) throw updateError;
-
-      // Perform handshake operations
-      await new Promise(resolve => setTimeout(resolve, 500)); // Brief delay for wallet to be ready
-
-      // Update to completed
-      const { error: completeError } = await (supabase as any)
-        .from('connected_wallets')
-        .update({
-          handshake_status: 'completed',
-          handshake_timestamp: new Date().toISOString(),
-          is_active: true,
-          last_used_at: new Date().toISOString(),
-        })
-        .eq('id', walletId)
-        .eq('user_id', user?.id);
-
-      if (completeError) throw completeError;
-
-      console.log('Handshake completed for:', walletId);
-      await fetchConnectedWallets();
-      return true;
-    } catch (err: any) {
-      console.error('Handshake error:', err);
-
-      // Mark as failed
-      await (supabase as any)
-        .from('connected_wallets')
-        .update({
-          handshake_status: 'failed',
-          handshake_timestamp: new Date().toISOString(),
-        })
-        .eq('id', walletId)
-        .eq('user_id', user?.id)
-        .catch(() => {}); // Ignore error in error handler
-
-      return false;
-    } finally {
-      handshakeInProgressRef.current.set(walletId, false);
-    }
-  };
-
-  /**
-   * Connect Wallet with Enhanced Logic
-   */
+  // Connect wallet with proper verification
   const connectWallet = async (walletType?: string): Promise<boolean> => {
     if (!address) {
       toast.error('Please connect your wallet via the Web3 button first');
@@ -430,49 +370,45 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return false;
       }
 
-      // Validate address format
-      if (!isValidWalletAddress(normalizedAddress)) {
-        toast.error('Invalid wallet address format');
-        return false;
-      }
-
-      // Fetch existing wallets
+      // Fetch all wallets for this address (including inactive ones to allow reconnection)
       const { data: existingWallets, error: existingFetchError } = await (supabase as any)
         .from('connected_wallets')
-        .select('id, verified, is_active, chain_id, wallet_address, handshake_status')
+        .select('id, verified, is_active, chain_id, wallet_address')
         .eq('wallet_address', normalizedAddress)
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .order('connected_at', { ascending: false });
 
       if (existingFetchError) throw existingFetchError;
 
-      // Find or create wallet record
+      // Find wallet matching this exact chain
       const exactChainWallet = existingWallets?.find((wallet: ConnectedWallet) => wallet.chain_id === activeChainId);
+      // If no exact match, use the most recent wallet for this address (allows reconnection after disconnect)
       const reusableWallet = exactChainWallet || existingWallets?.[0];
 
-      // If already connected and handshake complete, skip re-connection
-      if (exactChainWallet?.is_active && exactChainWallet?.handshake_status === 'completed') {
+      // If already active on this chain, just refresh
+      if (exactChainWallet?.is_active) {
         toast.info('Wallet already connected!');
         await refreshWallet();
         await fetchConnectedWallets();
         return true;
       }
 
-      console.log('Wallet connection details:', {
+      console.log('Wallet connection check:', {
         address: normalizedAddress,
         chainId: activeChainId,
-        walletType: resolvedWalletType,
-        isReactivating: reusableWallet && !reusableWallet.is_active,
+        existingWalletsCount: existingWallets?.length || 0,
+        exactChainWallet: exactChainWallet?.id,
+        reusableWallet: reusableWallet?.id,
+        isReactivating: reusableWallet && !reusableWallet.is_active
       });
 
-      // Generate secure message for signature
+      // Generate message for signature
       const timestamp = Date.now();
-      const nonce = Math.random().toString(36).substring(2, 15);
-      const message = `PoolTradePlug Wallet Verification\n\nWallet: ${address}\nChain ID: ${activeChainId}\nWallet Type: ${resolvedWalletType}\nTimestamp: ${timestamp}\nNonce: ${nonce}\n\nBy signing this message, you verify ownership of this wallet and authorize PoolTradePlug to associate it with your account. This action does not transfer any funds.`;
+      const message = `PoolTradePlug Wallet Verification\n\nWallet: ${address}\nChain ID: ${activeChainId}\nTimestamp: ${timestamp}\n\nBy signing this message, you verify ownership of this wallet and authorize PoolTradePlug to associate it with your account.`;
 
       // Request signature
       toast.info('Please sign the message to verify wallet ownership...');
       let signature: string;
-
       try {
         signature = await signerInstance.signMessage(message);
       } catch (signErr: any) {
@@ -483,7 +419,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         throw signErr;
       }
 
-      // Verify signature
+      // Verify signature on client side
       const recoveredAddress = ethers.verifyMessage(message, signature);
       if (recoveredAddress.toLowerCase() !== address.toLowerCase()) {
         throw new Error('Signature verification failed - addresses do not match');
@@ -502,11 +438,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         is_active: true,
         connected_at: new Date().toISOString(),
         last_used_at: new Date().toISOString(),
-        handshake_status: 'pending',
-        handshake_timestamp: new Date().toISOString(),
       };
 
-      // Update or insert wallet record
       if (reusableWallet) {
         const { error: updateError } = await (supabase as any)
           .from('connected_wallets')
@@ -518,18 +451,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           .eq('user_id', user.id);
 
         if (updateError) throw updateError;
-
-        // Perform handshake
-        const handshakeSuccess = await performHandshake(reusableWallet.id);
-        if (!handshakeSuccess) {
-          throw new Error('Wallet handshake failed');
-        }
       } else {
-        const { data: insertedWallet, error: insertError } = await (supabase as any)
+        const { error: insertError } = await (supabase as any)
           .from('connected_wallets')
-          .insert(walletPayload)
-          .select()
-          .single();
+          .insert(walletPayload);
 
         if (insertError) {
           if (insertError.message?.includes('unique constraint')) {
@@ -537,14 +462,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             return false;
           }
           throw insertError;
-        }
-
-        // Perform handshake on new wallet
-        if (insertedWallet?.id) {
-          const handshakeSuccess = await performHandshake(insertedWallet.id);
-          if (!handshakeSuccess) {
-            throw new Error('Wallet handshake failed');
-          }
         }
       }
 
@@ -566,14 +483,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const disconnectWallet = async (walletId: string) => {
     try {
       const walletToDisconnect = connectedWallets.find((wallet) => wallet.id === walletId);
-
       const { error: updateError } = await (supabase as any)
         .from('connected_wallets')
         .update({
           is_active: false,
           is_primary: false,
           last_used_at: new Date().toISOString(),
-          handshake_status: 'failed',
         })
         .eq('id', walletId)
         .eq('user_id', user?.id);
@@ -581,9 +496,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (updateError) throw updateError;
 
       if (walletToDisconnect?.is_primary) {
-        const replacementWallet = connectedWallets.find(
-          (wallet) => wallet.id !== walletId && wallet.is_active
-        );
+        const replacementWallet = connectedWallets.find((wallet) => wallet.id !== walletId && wallet.is_active);
         if (replacementWallet) {
           await (supabase as any)
             .from('connected_wallets')
@@ -605,12 +518,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Set primary wallet
   const setPrimaryWallet = async (walletId: string) => {
     try {
+      // Remove primary from all user's wallets
       await (supabase as any)
         .from('connected_wallets')
         .update({ is_primary: false })
         .eq('user_id', user?.id)
         .eq('is_active', true);
 
+      // Set new primary
       const { error: updateError } = await (supabase as any)
         .from('connected_wallets')
         .update({ is_primary: true })
@@ -628,7 +543,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
-  // Verify wallet
+  // Verify wallet ownership
   const verifyWallet = async (walletId: string): Promise<boolean> => {
     try {
       const wallet = connectedWallets.find((w) => w.id === walletId);
@@ -637,20 +552,21 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return false;
       }
 
+      // Verify signature
       const recoveredAddress = ethers.verifyMessage(wallet.message_signed, wallet.signature);
       const isValid = recoveredAddress.toLowerCase() === wallet.wallet_address.toLowerCase();
 
       if (isValid) {
         const { error: updateError } = await (supabase as any)
           .from('connected_wallets')
-          .update({
-            verified: true,
-            verified_at: new Date().toISOString(),
+          .update({ 
+            verified: true, 
+            verified_at: new Date().toISOString() 
           })
           .eq('id', walletId);
 
         if (updateError) throw updateError;
-
+        
         toast.success('Wallet verified successfully!');
         await fetchConnectedWallets();
       } else {
@@ -663,17 +579,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       toast.error('Verification failed: ' + err.message);
       return false;
     }
-  };
-
-  // Get available wallets for current platform
-  const getAvailableWalletsForPlatform = () => {
-    const detection = performComprehensiveDetection();
-    return detection.available.map(wallet => ({
-      name: wallet.name,
-      id: wallet.id,
-      isInstalled: wallet.isInstalled,
-      isMobile: wallet.hasMobile,
-    }));
   };
 
   const value: WalletContextType = {
@@ -692,13 +597,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     signer,
     currentChainId: chainId,
     currentAddress: address,
+    // Wallet detection utilities
     isWalletInstalled,
     getInstalledWallets,
     isMobile,
     openWalletDeepLink,
     detectWalletType,
-    performHandshake,
-    getAvailableWallets: getAvailableWalletsForPlatform,
   };
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;

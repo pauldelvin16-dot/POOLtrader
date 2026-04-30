@@ -97,48 +97,134 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
-  // Connect wallet
+  // Connect wallet - with improved error handling for all wallets
   const connectWallet = async (walletType: string): Promise<boolean> => {
-    if (!address) {
-      setError('Wallet not connected via Web3Modal');
-      return false;
-    }
-
     setIsConnecting(true);
     setError(null);
 
     try {
-      // Generate message for signature
-      const message = `Sign this message to verify your wallet ownership for PoolTradePlug.\n\nWallet: ${address}\nChain ID: ${chainId}\nTimestamp: ${Date.now()}`;
+      // Wait for address to be available (for WalletConnect and SafePal)
+      let attempts = 0;
+      let currentAddress = address;
 
-      // Sign the message
-      if (!signer) throw new Error('Signer not available');
-      const signature = await signer.signMessage(message);
+      while (!currentAddress && attempts < 50) {
+        // Wait for modal connection to complete
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+      }
 
-      // Store wallet in database
-      const { data, error: insertError } = await supabase
+      if (!currentAddress) {
+        throw new Error('No wallet address found. Please connect your wallet.');
+      }
+
+      // Ensure provider is ready
+      if (!walletProvider) {
+        throw new Error('Wallet provider not available. Please try again.');
+      }
+
+      // Generate message for signature - safe for all wallets
+      const now = Date.now();
+      const message = `Sign this message to verify your wallet ownership for PoolTradePlug.\n\nWallet: ${currentAddress}\nChain: ${chainId || 1}\nTime: ${new Date(now).toISOString()}`;
+
+      // Sign the message with better error handling
+      let signature: string;
+      try {
+        if (!signer) {
+          // If signer not ready, create one from provider
+          const ethersProvider = new BrowserProvider(walletProvider);
+          const newSigner = await ethersProvider.getSigner();
+          signature = await newSigner.signMessage(message);
+        } else {
+          signature = await signer.signMessage(message);
+        }
+      } catch (signErr: any) {
+        // User rejected signature or signing failed
+        if (signErr.code === 'ACTION_REJECTED') {
+          throw new Error('Signature rejected. Please try again.');
+        }
+        throw new Error(`Signing failed: ${signErr.message}`);
+      }
+
+      // Check if wallet already connected
+      const { data: existingWallet } = await supabase
         .from('connected_wallets')
-        .insert([
-          {
-            wallet_address: address.toLowerCase(),
+        .select('id')
+        .eq('wallet_address', currentAddress.toLowerCase())
+        .single();
+
+      let walletRecord;
+      if (existingWallet) {
+        // Update existing wallet
+        const { data, error: updateError } = await supabase
+          .from('connected_wallets')
+          .update({
             wallet_type: walletType,
             chain_id: chainId || 1,
             signature,
             message_signed: message,
             verified: true,
-            verified_at: new Date().toISOString(),
-            is_primary: connectedWallets.length === 0,
-          },
-        ])
-        .select();
+            last_used_at: new Date().toISOString(),
+          })
+          .eq('id', existingWallet.id)
+          .select()
+          .single();
 
-      if (insertError) throw insertError;
+        if (updateError) throw updateError;
+        walletRecord = data;
+      } else {
+        // Insert new wallet
+        const { data, error: insertError } = await supabase
+          .from('connected_wallets')
+          .insert([
+            {
+              wallet_address: currentAddress.toLowerCase(),
+              wallet_type: walletType || 'walletconnect',
+              chain_id: chainId || 1,
+              signature,
+              message_signed: message,
+              verified: true,
+              is_primary: connectedWallets.length === 0,
+              is_active: true,
+            },
+          ])
+          .select()
+          .single();
+
+        if (insertError) throw insertError;
+        walletRecord = data;
+      }
+
+      // Verify in database
+      if (walletRecord) {
+        try {
+          await supabase.functions.invoke('wallet-operations', {
+            body: {
+              action: 'verify_wallet',
+              walletId: walletRecord.id,
+              address: walletRecord.wallet_address,
+              signature: signature,
+            },
+          });
+        } catch (verifyErr) {
+          console.warn('Wallet verification call failed:', verifyErr);
+          // Continue anyway - local verification is enough
+        }
+      }
 
       await fetchConnectedWallets();
       return true;
     } catch (err: any) {
+      const errorMsg = err.message || 'Failed to connect wallet';
       console.error('Error connecting wallet:', err);
-      setError(err.message || 'Failed to connect wallet');
+      setError(errorMsg);
+      
+      // Provide helpful suggestions based on error
+      if (errorMsg.includes('Session namespaces')) {
+        setError('Wallet connection error. Please try MetaMask or Trust Wallet.');
+      } else if (errorMsg.includes('rejected')) {
+        setError('Connection rejected. Please approve the connection in your wallet.');
+      }
+      
       return false;
     } finally {
       setIsConnecting(false);

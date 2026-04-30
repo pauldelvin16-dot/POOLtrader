@@ -110,15 +110,42 @@ export function WalletConnectModal({ isOpen, onClose }: WalletConnectModalProps)
   }, [isOpen]);
 
   const handleConnectWallet = async () => {
-    if (!address || !selectedWallet) {
-      toast.error('Please connect wallet via Web3Modal first');
+    if (!selectedWallet) {
+      toast.error('Please select a wallet');
       return;
     }
 
-    const success = await connectWallet(selectedWallet);
-    if (success) {
-      toast.success(`${selectedWallet} connected successfully!`);
-      onClose();
+    try {
+      // Open Web3Modal to trigger connection
+      // This is required for SafePal and other wallets to properly negotiate sessions
+      toast.loading('Opening wallet...');
+      
+      await new Promise(resolve => setTimeout(resolve, 300));
+      await open();
+
+      // Wait for address to be available
+      await new Promise(resolve => {
+        let attempts = 0;
+        const checkInterval = setInterval(() => {
+          if (address || attempts > 50) {
+            clearInterval(checkInterval);
+            resolve(true);
+          }
+          attempts++;
+        }, 100);
+      });
+
+      // Now attempt the connection
+      const success = await connectWallet(selectedWallet);
+      if (success) {
+        toast.success(`${selectedWallet} connected successfully!`);
+        setTimeout(() => onClose(), 1000);
+      } else {
+        toast.error('Connection failed. Please try again.');
+      }
+    } catch (err: any) {
+      console.error('Connection error:', err);
+      toast.error(err.message || 'Failed to connect wallet');
     }
   };
 
@@ -127,24 +154,58 @@ export function WalletConnectModal({ isOpen, onClose }: WalletConnectModalProps)
     setMobileConnectionAttempt(true);
 
     try {
-      // Generate WalletConnect URI first (via Web3Modal)
+      // Step 1: Open Web3Modal to establish WalletConnect session
+      // This ensures proper namespace negotiation
+      toast.loading('Initializing WalletConnect...');
+      
+      await new Promise(resolve => setTimeout(resolve, 300));
       await open();
 
-      // Then attempt to open mobile wallet with deep link
-      const success = await walletDiscoveryService.tryMobileWallet(walletId, 'test-uri');
+      // Step 2: Wait for address to be available from Web3Modal
+      await new Promise<void>((resolve) => {
+        let attempts = 0;
+        const checkInterval = setInterval(() => {
+          if (address || attempts > 40) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+          attempts++;
+        }, 100);
+      });
 
-      if (!success) {
-        // Fallback: show app store link
-        const storeLink = walletDiscoveryService.getMobileStoreLink(walletId);
-        if (storeLink) {
-          const wallet = mobileWallets.find((w) => w.id === walletId);
-          toast.info(`Opening ${wallet?.name} in app store...`);
-          window.open(storeLink, '_blank');
+      // Step 3: Try deep link if address is available
+      if (address) {
+        toast.info(`Connecting via ${walletId}...`);
+        const success = await walletDiscoveryService.tryMobileWallet(walletId, 'wc-session');
+
+        if (success) {
+          // Connection successful
+          const walletName = mobileWallets.find((w) => w.id === walletId)?.name || walletId;
+          
+          // Attempt to register the wallet
+          const registerSuccess = await connectWallet(walletId);
+          if (registerSuccess) {
+            toast.success(`${walletName} connected!`);
+            setTimeout(() => onClose(), 1000);
+          } else {
+            toast.warning(`${walletName} opened. Please complete the connection.`);
+          }
+          return;
         }
       }
-    } catch (err) {
+
+      // Step 4: Fallback to app store if wallet not installed
+      const storeLink = walletDiscoveryService.getMobileStoreLink(walletId);
+      if (storeLink) {
+        const wallet = mobileWallets.find((w) => w.id === walletId);
+        toast.info(`${wallet?.name} not installed. Opening app store...`);
+        window.open(storeLink, '_blank');
+      } else {
+        toast.error('Wallet not found. Please try WalletConnect.');
+      }
+    } catch (err: any) {
       console.error('Mobile wallet connection failed:', err);
-      toast.error('Failed to connect mobile wallet');
+      toast.error(err.message || 'Failed to connect mobile wallet');
     } finally {
       setMobileConnectionAttempt(false);
       setActiveMobileWallet(null);

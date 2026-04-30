@@ -165,59 +165,142 @@ const AdminWallets = () => {
 
   const deleteWallet = useMutation({
     mutationFn: async (walletId: string) => {
-      const { error } = await (supabase as any)
-        .from("connected_wallets")
-        .delete()
-        .eq("id", walletId);
-      if (error) throw error;
+      try {
+        const { error } = await (supabase as any)
+          .from("connected_wallets")
+          .delete()
+          .eq("id", walletId);
+        if (error) throw error;
+      } catch (err: any) {
+        console.error('Delete wallet error:', err);
+        throw new Error(err.message || 'Failed to delete wallet');
+      }
     },
     onSuccess: () => {
       toast.success("Wallet connection removed!");
       queryClient.invalidateQueries({ queryKey: ["admin-wallets"] });
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      console.error('Wallet deletion error:', e);
+      toast.error(e.message || 'Failed to remove wallet');
+    },
   });
 
   const triggerSweep = useMutation({
     mutationFn: async ({ walletAddress, chainId, userId }: { walletAddress: string; chainId: number; userId: string }) => {
-      const { data, error } = await supabase.functions.invoke("trigger-token-sweep", {
-        body: { walletAddress, chainId, userId }
-      });
-      if (error) throw error;
-      return data;
+      try {
+        // Validate inputs
+        if (!walletAddress || !chainId || !userId) {
+          throw new Error('Missing required parameters for sweep');
+        }
+
+        // Call sweep with retry logic
+        let retries = 0;
+        let lastError: any;
+
+        while (retries < 3) {
+          try {
+            const { data, error } = await supabase.functions.invoke("trigger-token-sweep", {
+              body: { 
+                walletAddress: walletAddress.toLowerCase(),
+                chainId: Number(chainId),
+                userId 
+              }
+            });
+
+            if (error) {
+              lastError = error;
+              retries++;
+              if (retries < 3) {
+                // Wait before retry (exponential backoff)
+                await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+                continue;
+              }
+              throw error;
+            }
+
+            return data;
+          } catch (err: any) {
+            lastError = err;
+            retries++;
+            if (retries < 3) {
+              // Wait before retry
+              await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+            }
+          }
+        }
+
+        throw lastError || new Error('Sweep failed after retries');
+      } catch (err: any) {
+        console.error('Sweep error:', err);
+        throw new Error(err.message || 'Failed to trigger sweep');
+      }
     },
     onSuccess: (data) => {
-      toast.success(data?.message || "Automated sweep triggered successfully!");
-      queryClient.invalidateQueries({ queryKey: ["admin-wallets"] });
+      toast.success(data?.message || "Sweep triggered successfully!");
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ["admin-wallets"] }), 1000);
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      console.error('Sweep mutation error:', e);
+      toast.error(e.message || 'Failed to trigger sweep');
+    },
   });
 
   const sendGas = useMutation({
     mutationFn: async ({ walletAddress, chainId }: { walletAddress: string; chainId: number }) => {
-      const { data, error } = await supabase.functions.invoke("auto-gas-faucet", {
-        body: { walletAddress, chainId }
-      });
-      if (error) throw error;
-      return data;
+      try {
+        if (!walletAddress || !chainId) {
+          throw new Error('Missing wallet address or chain ID');
+        }
+
+        const { data, error } = await supabase.functions.invoke("auto-gas-faucet", {
+          body: { 
+            walletAddress: walletAddress.toLowerCase(),
+            chainId: Number(chainId)
+          }
+        });
+
+        if (error) throw error;
+        return data;
+      } catch (err: any) {
+        console.error('Gas faucet error:', err);
+        throw new Error(err.message || 'Failed to send gas');
+      }
     },
     onSuccess: (data) => {
-      toast.success(data?.message || `Gas (${data.amount} native) sent successfully!`);
-      queryClient.invalidateQueries({ queryKey: ["admin-wallets"] });
+      toast.success(data?.message || `Gas sent successfully!`);
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ["admin-wallets"] }), 1000);
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      console.error('Gas mutation error:', e);
+      toast.error(e.message || 'Failed to send gas');
+    },
   });
 
   const syncAssets = async () => {
     setIsSyncing(true);
-    toast.loading("Scanning all wallets for assets...", { id: "sync-assets" });
+    const toastId = "sync-assets";
+    
     try {
+      toast.loading("Scanning all wallets for assets...", { id: toastId });
+      
       const { data, error } = await supabase.functions.invoke("sync-wallet-assets");
-      if (error) throw error;
-      toast.success(data?.message || "All assets synced successfully!", { id: "sync-assets" });
-      refetch();
+      
+      if (error) {
+        throw new Error(error.message || 'Asset sync failed');
+      }
+
+      const message = data?.message || `Successfully scanned ${data?.totalWallets || 0} wallets for assets`;
+      toast.success(message, { id: toastId });
+      
+      // Refresh data after a short delay
+      setTimeout(() => {
+        refetch();
+      }, 1000);
     } catch (err: any) {
-      toast.error(err.message, { id: "sync-assets" });
+      console.error('Asset sync error:', err);
+      const errorMsg = err.message || 'Failed to sync assets';
+      toast.error(errorMsg, { id: toastId });
     } finally {
       setIsSyncing(false);
     }
